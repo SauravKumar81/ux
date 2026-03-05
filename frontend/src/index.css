@@ -7,13 +7,42 @@
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+    overflow-x: hidden;
+  }
+
   body {
     @apply bg-black text-white font-sans antialiased;
+    /* Stop scroll chaining — keeps scrolling on the GPU compositor thread */
+    overscroll-behavior: none;
+  }
+
+  /* Isolate the root so compositing layers don't bleed across the page */
+  #root {
+    isolation: isolate;
   }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* ── Deferred paint for off-screen sections ────────────────────────────
+     content-visibility: auto skips layout + paint for sections outside
+     the viewport. On a page this long, this is the single biggest win    */
+  .lazy-section {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 600px;
+  }
+
+  /* ── GPU compositor layer ──────────────────────────────────────────────
+     Promote Spline / heavy elements to their own layer so WebGL never
+     blocks scroll. Use sparingly — every layer costs GPU memory.         */
+  .gpu-layer {
+    transform: translateZ(0);
+    will-change: transform;
+    backface-visibility: hidden;
   }
 }

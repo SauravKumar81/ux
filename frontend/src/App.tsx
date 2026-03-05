@@ -346,19 +346,18 @@ export default function App() {
   const heroRef = useRef<HTMLDivElement>(null);
   const [isHeroVisible, setIsHeroVisible] = useState(true);
 
-  // Only render/animate the Spline scene when the hero section is in viewport
+  // Pause/resume Spline based on hero visibility.
+  // rootMargin gives a 200px buffer so Spline pauses *before* it leaves
+  // the screen — eliminates the visible hitch at the transition boundary.
   useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
         setIsHeroVisible(entry.isIntersecting);
       },
-      { threshold: 0.05 } // trigger when even 5% of hero is visible
+      { threshold: 0, rootMargin: '0px 0px 200px 0px' }
     );
 
-    if (heroRef.current) {
-      observer.observe(heroRef.current);
-    }
-
+    if (heroRef.current) observer.observe(heroRef.current);
     return () => observer.disconnect();
   }, []);
 
@@ -371,11 +370,8 @@ export default function App() {
         ref={heroRef}
         className="relative min-h-[150svh] flex flex-col justify-end overflow-hidden"
       >
-        {/* Spline Scene — takes up top ~100vh, pointer-events disabled */}
-        <div
-          className="absolute inset-0 w-full h-full bg-black pointer-events-none"
-          style={{ willChange: 'transform' }}
-        >
+        {/* Spline Scene — promoted to own GPU layer via gpu-layer class */}
+        <div className="absolute inset-0 w-full h-full bg-black pointer-events-none gpu-layer">
           <ResponsiveSplineScene
             sceneUrl="https://prod.spline.design/8CLWkeoM6y2sXPgC/scene.splinecode"
             isVisible={isHeroVisible}
@@ -400,12 +396,13 @@ export default function App() {
         </div>
       </section>
 
-      {/* Projects */}
-      <div className="py-10 text-center bg-black relative z-10">
+      {/* Projects — lazy-section defers paint until scrolled near */}
+      <div className="py-10 text-center bg-black relative z-10 lazy-section">
         <span className="text-[10px] uppercase tracking-[0.3em] text-zinc-600 font-bold">Projects</span>
       </div>
 
-      <div className="relative z-10 bg-black">
+      {/* contain:paint so project-card reflows don't repaint the full page */}
+      <div className="relative z-10 bg-black" style={{ contain: 'paint' }}>
         <ProjectCard
           title="Avant-Garde Territory"
           category="visual language for telling the story of Ural's Avant-garde architecture in a modern way"
@@ -443,7 +440,7 @@ export default function App() {
         />
 
         {/* Services Section */}
-        <section className="py-32 bg-zinc-950" id="services">
+        <section className="py-32 bg-zinc-950 lazy-section" id="services">
           <div className="container mx-auto px-6">
             <div className="text-center mb-20">
               <span className="text-[10px] uppercase tracking-[0.3em] text-zinc-600 font-bold mb-4 block">Services</span>
