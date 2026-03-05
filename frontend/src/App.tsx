@@ -47,87 +47,62 @@ const Navbar = () => {
   );
 };
 
-// --- Spline Scene — loads once, NEVER re-renders ---
-// React.memo with () => true as comparator means this component renders
-// EXACTLY ONCE. All subsequent prop changes are silently ignored.
-// All visibility/scroll logic runs inside via DOM refs — zero state updates.
+// --- Spline Scene — loads once, snapshots, then becomes a static image ---
+//
+// Strategy:
+//   1. Mount Spline (deferred, after idle)
+//   2. After N frames, capture canvas → toDataURL (PNG snapshot)
+//   3. Unmount Spline, replace with <img> — zero WebGL from this point on
+//   4. React.memo(() => true) ensures this component itself never re-renders
+//
 const SplineScene = React.memo(({ sceneUrl }: { sceneUrl: string }) => {
   const isMobile = window.innerWidth < 768;
-  const [loaded, setLoaded] = useState(false);
-  const [shouldMount, setShouldMount] = useState(false);
-  const [webGLFailed, setWebGLFailed] = useState(false);
-  const splineRef = useRef<any>(null);
+  const [shouldMount, setShouldMount]   = useState(false);
+  const [snapshot, setSnapshot]         = useState<string | null>(null); // data URL
   const containerRef = useRef<HTMLDivElement>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Deferred mount — wait for idle, then load Spline once
+  // Step 1 — deferred mount after page is interactive
   useEffect(() => {
     if (isMobile) return;
     let rafId: number;
     const mount = () => setShouldMount(true);
-    const timerId = setTimeout(() => {
+    const timer = setTimeout(() => {
       if ('requestIdleCallback' in window) {
         (window as any).requestIdleCallback(mount, { timeout: 3000 });
       } else {
         rafId = requestAnimationFrame(mount);
       }
     }, 1500);
-    return () => { clearTimeout(timerId); cancelAnimationFrame(rafId); };
-  }, []); // [] = runs once, never again
-
-  // After load: (1) freeze WebGL during scroll, (2) pause when hero off-screen
-  // Both use refs + direct DOM/API calls — ZERO state updates after this point
-  useEffect(() => {
-    if (!loaded) return;
-
-    // ── Freeze canvas during scroll (stops GPU rasterization entirely) ─────
-    let scrollTimer: ReturnType<typeof setTimeout>;
-    const onScroll = () => {
-      if (containerRef.current) containerRef.current.style.visibility = 'hidden';
-      clearTimeout(scrollTimer);
-      scrollTimer = setTimeout(() => {
-        if (containerRef.current) containerRef.current.style.visibility = 'visible';
-      }, 150);
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-
-    // ── Pause Spline when hero leaves viewport (via IntersectionObserver) ───
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        try {
-          if (entry.isIntersecting) splineRef.current?.play?.();
-          else splineRef.current?.pause?.();
-        } catch { /* Spline API may not support this */ }
-      },
-      { threshold: 0, rootMargin: '0px 0px 200px 0px' }
-    );
-    if (wrapperRef.current) observer.observe(wrapperRef.current);
-
-    // ── WebGL context-loss fallback ───────────────────────────────
-    setTimeout(() => {
-      const canvas = containerRef.current?.querySelector('canvas');
-      if (canvas) {
-        canvas.addEventListener('webglcontextlost', (e) => {
-          e.preventDefault();
-          setWebGLFailed(true);
-          setShouldMount(false);
-        }, { once: true });
-      }
-    }, 500);
-
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      clearTimeout(scrollTimer);
-      observer.disconnect();
-    };
-  }, [loaded]); // runs once after load
-
-  const handleSplineLoad = useCallback((splineApp: any) => {
-    splineRef.current = splineApp;
-    setLoaded(true);
+    return () => { clearTimeout(timer); cancelAnimationFrame(rafId); };
   }, []);
 
-  // Mobile: CSS-only static fallback
+  // Step 2 — called by Spline's onLoad callback
+  const handleSplineLoad = useCallback(() => {
+    // Give Spline ~10 frames (~170ms at 60fps) to finish drawing before we snapshot
+    let frameCount = 0;
+    const capture = () => {
+      frameCount++;
+      if (frameCount < 10) {
+        requestAnimationFrame(capture);
+        return;
+      }
+      // Grab the canvas Spline rendered into
+      const canvas = containerRef.current?.querySelector('canvas');
+      if (!canvas) return;
+      try {
+        // Snapshot as PNG data URL — this is now a plain static image
+        const dataUrl = (canvas as HTMLCanvasElement).toDataURL('image/png');
+        // Replace live WebGL with the frozen image, unmount Spline
+        setSnapshot(dataUrl);
+        setShouldMount(false); // <-- unmounts <Spline>, destroys WebGL context
+      } catch {
+        // toDataURL can throw if canvas is tainted; fall through to live mode
+      }
+    };
+    requestAnimationFrame(capture);
+  }, []);
+
+  // Mobile fallback — pure CSS shapes, no WebGL at all
   if (isMobile) {
     return (
       <div className="absolute inset-0 flex items-center justify-center gap-4">
@@ -138,45 +113,41 @@ const SplineScene = React.memo(({ sceneUrl }: { sceneUrl: string }) => {
     );
   }
 
-  if (webGLFailed) {
-    return (
-      <div className="absolute inset-0 bg-black">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(60,60,70,0.5),transparent)]" />
-      </div>
-    );
-  }
-
   return (
-    <div ref={wrapperRef} className="absolute inset-0 z-0">
-      {/* Placeholder — fades out once Spline loads */}
-      <div className={`absolute inset-0 transition-opacity duration-1000 ${loaded ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
-        <div className="absolute inset-0 bg-black" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(60,60,70,0.5),transparent)]" />
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-zinc-800/30 blur-3xl animate-pulse" />
-      </div>
+    <div className="absolute inset-0">
 
-      {/* Spline — mounts once after idle, never unmounts */}
-      {shouldMount && (
+      {/* Loading placeholder — shown until snapshot is ready */}
+      {!snapshot && (
+        <div className="absolute inset-0">
+          <div className="absolute inset-0 bg-black" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(60,60,70,0.5),transparent)]" />
+          <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-zinc-800/30 blur-3xl animate-pulse" />
+        </div>
+      )}
+
+      {/* Live Spline — only exists until snapshot is captured, then unmounts */}
+      {shouldMount && !snapshot && (
         <Suspense fallback={null}>
-          <div
-            ref={containerRef}
-            className={`w-full h-full transition-opacity duration-1000 ${loaded ? 'opacity-100' : 'opacity-0'}`}
-          >
+          <div ref={containerRef} className="w-full h-full">
             <Spline scene={sceneUrl} className="w-full h-full" onLoad={handleSplineLoad} />
           </div>
         </Suspense>
       )}
 
-      {/* Live status badge */}
-      {loaded && (
-        <div className="absolute top-5 right-5 flex items-center gap-2 bg-black/40 backdrop-blur-md border border-white/10 rounded-full px-3 py-1.5 text-[10px] text-zinc-400 font-medium tracking-wider uppercase">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          3D Live
-        </div>
+      {/* Static snapshot — replaces WebGL permanently, zero GPU cost */}
+      {snapshot && (
+        <img
+          src={snapshot}
+          alt="3D scene"
+          className="absolute inset-0 w-full h-full object-cover"
+          draggable={false}
+        />
       )}
+
     </div>
   );
-}, () => true); // ← always returns true = props never differ = renders ONCE, never again
+}, () => true); // renders once — React.memo with constant comparator
+
 
 
 const ProjectCard = ({ title, category, description, images, tags }: any) => {
