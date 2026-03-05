@@ -1,28 +1,8 @@
-import React, { useState, Suspense, lazy, useEffect, useRef, useCallback } from 'react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Plus, Minus, ArrowUpRight, Phone } from 'lucide-react';
 import { cn } from './lib/utils';
-
-// Spline is excluded from optimizeDeps — loaded fully on demand
-const Spline = lazy(() => import('@splinetool/react-spline'));
-
-// ─── Suppress non-fatal ANGLE / D3D11 WebGL shader-compilation spam ───────────
-// These "GL_INVALID_OPERATION / D3D11 error compiling dynamic vertex executable"
-// messages are emitted by Chrome's ANGLE layer on certain Windows GPU drivers.
-// They are driver-level warnings — the scene still renders correctly.
-// We intercept them so they don't flood the DevTools console.
-const _origConsoleError = console.error.bind(console);
-console.error = (...args: unknown[]) => {
-  const msg = typeof args[0] === 'string' ? args[0] : '';
-  if (
-    msg.includes('GL_INVALID_OPERATION') ||
-    msg.includes('ANGLE') ||
-    msg.includes('D3D11') ||
-    msg.includes('libANGLE') ||
-    msg.includes('dynamic vertex executable')
-  ) return; // silently drop GPU-driver noise
-  _origConsoleError(...args);
-};
+import AnimatedShaderBackground from './components/ui/animated-shader-background';
 
 
 // --- Components ---
@@ -46,107 +26,6 @@ const Navbar = () => {
     </div>
   );
 };
-
-// --- Spline Scene — loads once, snapshots, then becomes a static image ---
-//
-// Strategy:
-//   1. Mount Spline (deferred, after idle)
-//   2. After N frames, capture canvas → toDataURL (PNG snapshot)
-//   3. Unmount Spline, replace with <img> — zero WebGL from this point on
-//   4. React.memo(() => true) ensures this component itself never re-renders
-//
-const SplineScene = React.memo(({ sceneUrl }: { sceneUrl: string }) => {
-  const isMobile = window.innerWidth < 768;
-  const [shouldMount, setShouldMount]   = useState(false);
-  const [snapshot, setSnapshot]         = useState<string | null>(null); // data URL
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Step 1 — deferred mount after page is interactive
-  useEffect(() => {
-    if (isMobile) return;
-    let rafId: number;
-    const mount = () => setShouldMount(true);
-    const timer = setTimeout(() => {
-      if ('requestIdleCallback' in window) {
-        (window as any).requestIdleCallback(mount, { timeout: 3000 });
-      } else {
-        rafId = requestAnimationFrame(mount);
-      }
-    }, 1500);
-    return () => { clearTimeout(timer); cancelAnimationFrame(rafId); };
-  }, []);
-
-  // Step 2 — called by Spline's onLoad callback
-  const handleSplineLoad = useCallback(() => {
-    // Give Spline ~10 frames (~170ms at 60fps) to finish drawing before we snapshot
-    let frameCount = 0;
-    const capture = () => {
-      frameCount++;
-      if (frameCount < 10) {
-        requestAnimationFrame(capture);
-        return;
-      }
-      // Grab the canvas Spline rendered into
-      const canvas = containerRef.current?.querySelector('canvas');
-      if (!canvas) return;
-      try {
-        // Snapshot as PNG data URL — this is now a plain static image
-        const dataUrl = (canvas as HTMLCanvasElement).toDataURL('image/png');
-        // Replace live WebGL with the frozen image, unmount Spline
-        setSnapshot(dataUrl);
-        setShouldMount(false); // <-- unmounts <Spline>, destroys WebGL context
-      } catch {
-        // toDataURL can throw if canvas is tainted; fall through to live mode
-      }
-    };
-    requestAnimationFrame(capture);
-  }, []);
-
-  // Mobile fallback — pure CSS shapes, no WebGL at all
-  if (isMobile) {
-    return (
-      <div className="absolute inset-0 flex items-center justify-center gap-4">
-        <div className="w-24 h-24 rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 shadow-2xl" />
-        <div className="w-32 h-32 rounded-[24px] bg-gradient-to-br from-zinc-600 to-zinc-800 shadow-2xl -rotate-6" />
-        <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-zinc-700 to-zinc-900 shadow-2xl rotate-45" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="absolute inset-0">
-
-      {/* Loading placeholder — shown until snapshot is ready */}
-      {!snapshot && (
-        <div className="absolute inset-0">
-          <div className="absolute inset-0 bg-black" />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(60,60,70,0.5),transparent)]" />
-          <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-zinc-800/30 blur-3xl animate-pulse" />
-        </div>
-      )}
-
-      {/* Live Spline — only exists until snapshot is captured, then unmounts */}
-      {shouldMount && !snapshot && (
-        <Suspense fallback={null}>
-          <div ref={containerRef} className="w-full h-full">
-            <Spline scene={sceneUrl} className="w-full h-full" onLoad={handleSplineLoad} />
-          </div>
-        </Suspense>
-      )}
-
-      {/* Static snapshot — replaces WebGL permanently, zero GPU cost */}
-      {snapshot && (
-        <img
-          src={snapshot}
-          alt="3D scene"
-          className="absolute inset-0 w-full h-full object-cover"
-          draggable={false}
-        />
-      )}
-
-    </div>
-  );
-}, () => true); // renders once — React.memo with constant comparator
 
 
 
@@ -285,37 +164,90 @@ const FAQItem = ({ question, answer }: any) => {
 // --- Main App ---
 
 export default function App() {
-  const heroRef = useRef<HTMLDivElement>(null);
   return (
     <div className="min-h-screen bg-black selection:bg-white selection:text-black">
       <Navbar />
 
-      {/* Hero Section with Spline contained inside (not fixed) */}
-      <section
-        ref={heroRef}
-        className="relative min-h-[150svh] flex flex-col justify-end overflow-hidden"
-      >
-        {/* Spline Scene — renders once, frozen to its own GPU layer */}
-        <div className="absolute inset-0 w-full h-full bg-black pointer-events-none gpu-layer">
-          <SplineScene sceneUrl="https://prod.spline.design/8CLWkeoM6y2sXPgC/scene.splinecode" />
+      {/* ── Hero Section ─────────────────────────────────────────────────── */}
+      <section className="relative h-screen flex items-center justify-center overflow-hidden">
+
+        {/* Aurora shader — fills the entire hero */}
+        <div className="absolute inset-0 pointer-events-none">
+          <AnimatedShaderBackground />
         </div>
 
-        {/* Strong gradient fade — completely blacks out the bottom 50% */}
-        <div className="absolute bottom-0 left-0 right-0 h-[55%] bg-gradient-to-t from-black from-40% via-black/95 via-60% to-transparent z-10 pointer-events-none" />
+        {/* Gradient vignette — darkens edges so text pops */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_70%_at_50%_50%,transparent_30%,rgba(0,0,0,0.7)_100%)] pointer-events-none" />
+        <div className="absolute bottom-0 inset-x-0 h-48 bg-gradient-to-t from-black to-transparent pointer-events-none" />
 
-        {/* Text — sits well below the 3D model in clean dark space */}
-        <div className="container mx-auto px-6 md:px-12 lg:px-20 relative z-20 pb-20 md:pb-28">
-          <motion.h1
-            initial={{ y: 40, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ duration: 0.8, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="text-3xl md:text-4xl lg:text-[3.2rem] font-bold tracking-tight text-white leading-[1.2] max-w-3xl"
+        {/* Centred content */}
+        <div className="relative z-10 text-center px-6 max-w-5xl mx-auto">
+
+          {/* Studio label */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+            className="mb-8"
           >
-            We are Poch, a design studio<br />
-            of few friends with endless (<span className="inline-block align-middle">🪐</span>)<br />
-            skills and ideas.
+            <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.35em] text-white/50 font-semibold border border-white/10 rounded-full px-4 py-2 backdrop-blur-sm bg-white/5">
+              <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+              Design Studio
+            </span>
+          </motion.div>
+
+          {/* Main headline */}
+          <motion.h1
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
+            className="text-5xl md:text-6xl lg:text-7xl font-black tracking-tight text-white leading-[1.08] mb-6"
+          >
+            We are{' '}
+            <span className="bg-gradient-to-r from-white via-white/90 to-white/60 bg-clip-text text-transparent">
+              Poch,
+            </span>
+            <br />
+            a design studio
+            <br />
+            <span className="text-white/70 font-light italic">of few friends with endless</span>{' '}
+            <span className="inline-block align-middle text-5xl md:text-6xl lg:text-7xl">🪐</span>
+            <br />
+            <span className="text-white/70 font-light italic">skills and ideas.</span>
           </motion.h1>
+
+          {/* CTA row */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.35, ease: [0.16, 1, 0.3, 1] }}
+            className="flex items-center justify-center gap-4 mt-10"
+          >
+            <a
+              href="#work"
+              className="bg-white text-black text-sm font-bold px-8 py-3.5 rounded-full hover:bg-zinc-100 transition-colors tracking-wide"
+            >
+              See our work
+            </a>
+            <a
+              href="#services"
+              className="text-white/60 text-sm font-medium hover:text-white transition-colors tracking-wide flex items-center gap-1.5"
+            >
+              What we do <ArrowUpRight className="w-4 h-4" />
+            </a>
+          </motion.div>
         </div>
+
+        {/* Scroll hint */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.2 }}
+          className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2"
+        >
+          <span className="text-[10px] uppercase tracking-[0.3em] text-white/30">scroll</span>
+          <div className="w-px h-8 bg-gradient-to-b from-white/30 to-transparent" />
+        </motion.div>
       </section>
 
       {/* Projects */}
