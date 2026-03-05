@@ -104,7 +104,7 @@ const SplineScene = React.memo(({ sceneUrl }: { sceneUrl: string }) => {
     if (wrapperRef.current) observer.observe(wrapperRef.current);
 
     // ── WebGL context-loss fallback ───────────────────────────────
-etTimeout(() => {
+    setTimeout(() => {
       const canvas = containerRef.current?.querySelector('canvas');
       if (canvas) {
         canvas.addEventListener('webglcontextlost', (e) => {
@@ -176,8 +176,7 @@ etTimeout(() => {
       )}
     </div>
   );
-}, () => true); // ←─ second arg: always return true = props never changed = never re-render
-};
+}, () => true); // ← always returns true = props never differ = renders ONCE, never again
 
 
 const ProjectCard = ({ title, category, description, images, tags }: any) => {
