@@ -15,6 +15,23 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    // Pre-bundle heavy deps so they don't block initial render
+    optimizeDeps: {
+      include: ['motion/react', 'lucide-react', 'lodash.debounce'],
+      exclude: ['@splinetool/react-spline', '@splinetool/runtime'],
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // Spline loads in its own separate chunk — never blocks main bundle
+            spline: ['@splinetool/react-spline', '@splinetool/runtime'],
+            // React + motion in one chunk
+            vendor: ['react', 'react-dom', 'motion/react'],
+          },
+        },
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.

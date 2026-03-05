@@ -1,9 +1,29 @@
 import React, { useState, Suspense, lazy, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-
-const Spline = lazy(() => import('@splinetool/react-spline'));
 import { Plus, Minus, ArrowUpRight, Phone } from 'lucide-react';
 import { cn } from './lib/utils';
+
+// Spline is excluded from optimizeDeps — loaded fully on demand
+const Spline = lazy(() => import('@splinetool/react-spline'));
+
+// ─── Suppress non-fatal ANGLE / D3D11 WebGL shader-compilation spam ───────────
+// These "GL_INVALID_OPERATION / D3D11 error compiling dynamic vertex executable"
+// messages are emitted by Chrome's ANGLE layer on certain Windows GPU drivers.
+// They are driver-level warnings — the scene still renders correctly.
+// We intercept them so they don't flood the DevTools console.
+const _origConsoleError = console.error.bind(console);
+console.error = (...args: unknown[]) => {
+  const msg = typeof args[0] === 'string' ? args[0] : '';
+  if (
+    msg.includes('GL_INVALID_OPERATION') ||
+    msg.includes('ANGLE') ||
+    msg.includes('D3D11') ||
+    msg.includes('libANGLE') ||
+    msg.includes('dynamic vertex executable')
+  ) return; // silently drop GPU-driver noise
+  _origConsoleError(...args);
+};
+
 
 // --- Components ---
 
@@ -27,21 +47,22 @@ const Navbar = () => {
   );
 };
 
-// --- Optimized Spline Component (only renders when visible) ---
+// --- Optimized Spline Component — deferred idle load ---
 
 const ResponsiveSplineScene = ({ sceneUrl, isVisible }: { sceneUrl: string; isVisible: boolean }) => {
   const [isMobile, setIsMobile] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Key: don't even START mounting Spline until page is interactive
+  const [shouldMount, setShouldMount] = useState(false);
   const splineRef = useRef<any>(null);
 
+  // Debounced mobile check
   useEffect(() => {
-    // Debounced resize check
     let timeoutId: ReturnType<typeof setTimeout>;
     const check = () => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => setIsMobile(window.innerWidth < 768), 150);
     };
-    // Initial check (immediate)
     setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', check);
     return () => {
@@ -50,19 +71,35 @@ const ResponsiveSplineScene = ({ sceneUrl, isVisible }: { sceneUrl: string; isVi
     };
   }, []);
 
-  // Pause/resume Spline rendering based on visibility
+  // Deferred mount: wait for page to be fully interactive, then load Spline
+  // Uses requestIdleCallback so it never blocks user interaction
   useEffect(() => {
-    if (splineRef.current) {
-      try {
-        if (isVisible) {
-          splineRef.current.play?.();
-        } else {
-          splineRef.current.pause?.();
-        }
-      } catch {
-        // Spline API may not support play/pause on all versions
+    if (isMobile) return; // mobile uses static fallback
+    let rafId: number;
+    const mountSpline = () => {
+      setShouldMount(true);
+    };
+    // Wait 1.5s then mount during browser idle time
+    const timerId = setTimeout(() => {
+      if ('requestIdleCallback' in window) {
+        (window as any).requestIdleCallback(mountSpline, { timeout: 3000 });
+      } else {
+        rafId = requestAnimationFrame(mountSpline);
       }
-    }
+    }, 1500);
+    return () => {
+      clearTimeout(timerId);
+      cancelAnimationFrame(rafId);
+    };
+  }, [isMobile]);
+
+  // Pause/resume Spline rendering based on hero visibility
+  useEffect(() => {
+    if (!splineRef.current) return;
+    try {
+      if (isVisible) splineRef.current.play?.();
+      else splineRef.current.pause?.();
+    } catch { /* Spline API may not support play/pause on all versions */ }
   }, [isVisible]);
 
   const handleSplineLoad = useCallback((splineApp: any) => {
@@ -70,71 +107,59 @@ const ResponsiveSplineScene = ({ sceneUrl, isVisible }: { sceneUrl: string; isVi
     setLoaded(true);
   }, []);
 
+  // Mobile: lightweight static fallback (no WebGL at all)
   if (isMobile) {
-    // Static Fallback for Mobile (to save battery & avoid freezing)
     return (
       <div className="absolute inset-0 flex items-center justify-center gap-4">
-        <motion.img
+        <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.2 }}
-          src="https://picsum.photos/seed/basketball/600/600"
-          className="w-24 h-24 rounded-full object-cover shadow-2xl rotate-12"
-          referrerPolicy="no-referrer"
+          className="w-24 h-24 rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 shadow-2xl"
         />
-        <motion.img
+        <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.4 }}
-          src="https://picsum.photos/seed/chair/600/600"
-          className="w-32 h-32 rounded-[24px] object-cover shadow-2xl -rotate-6"
-          referrerPolicy="no-referrer"
+          className="w-32 h-32 rounded-[24px] bg-gradient-to-br from-zinc-600 to-zinc-800 shadow-2xl -rotate-6"
         />
-        <motion.img
+        <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.6 }}
-          src="https://picsum.photos/seed/dice/600/600"
-          className="w-24 h-24 rounded-3xl object-cover shadow-2xl rotate-45"
-          referrerPolicy="no-referrer"
+          className="w-24 h-24 rounded-3xl bg-gradient-to-br from-zinc-700 to-zinc-900 shadow-2xl rotate-45"
         />
-      </div>
-    );
-  }
-
-  // Don't mount Spline at all if not visible (and hasn't loaded yet)
-  if (!isVisible && !loaded) {
-    return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500 gap-4 pointer-events-none">
-        <div className="w-8 h-8 rounded-full border-t-2 border-zinc-500 animate-spin" />
-        <span className="text-xs font-bold tracking-widest uppercase">Loading 3D...</span>
       </div>
     );
   }
 
   return (
     <div className="absolute inset-0 z-0">
-      {!loaded && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-500 gap-4 pointer-events-none">
-          <div className="w-8 h-8 rounded-full border-t-2 border-zinc-500 animate-spin" />
-          <span className="text-xs font-bold tracking-widest uppercase">Loading 3D...</span>
-        </div>
+      {/* Beautiful animated placeholder — shown instantly, zero cost */}
+      <div
+        className={`absolute inset-0 transition-opacity duration-1000 ${loaded ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+      >
+        <div className="absolute inset-0 bg-black" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(60,60,70,0.5),transparent)]" />
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-zinc-800/30 blur-3xl animate-pulse" />
+      </div>
+
+      {/* Spline — only mounts after 1.5s idle delay */}
+      {shouldMount && (
+        <Suspense fallback={null}>
+          <div className={`w-full h-full transition-opacity duration-1000 ${loaded ? 'opacity-100' : 'opacity-0'}`}>
+            <Spline
+              scene={sceneUrl}
+              className="w-full h-full"
+              onLoad={handleSplineLoad}
+            />
+          </div>
+        </Suspense>
       )}
-      <Suspense fallback={null}>
-        <div
-          className={`w-full h-full transition-opacity duration-1000 ${loaded ? 'opacity-100' : 'opacity-0'}`}
-          style={{ willChange: 'opacity' }}
-        >
-          <Spline 
-            scene={sceneUrl} 
-            className="w-full h-full"
-            onLoad={handleSplineLoad}
-          />
-        </div>
-      </Suspense>
     </div>
   );
 };
+
 
 const ProjectCard = ({ title, category, description, images, tags }: any) => {
   return (
@@ -303,9 +328,9 @@ export default function App() {
       {/* Hero Section with Spline contained inside (not fixed) */}
       <section
         ref={heroRef}
-        className="relative min-h-[100svh] flex flex-col justify-end overflow-hidden"
+        className="relative min-h-[150svh] flex flex-col justify-end overflow-hidden"
       >
-        {/* Spline Scene — contained within hero, pointer-events disabled so it doesn't block interactions */}
+        {/* Spline Scene — takes up top ~100vh, pointer-events disabled */}
         <div
           className="absolute inset-0 w-full h-full bg-black pointer-events-none"
           style={{ willChange: 'transform' }}
@@ -316,10 +341,11 @@ export default function App() {
           />
         </div>
 
-        {/* Bottom gradient fade — creates gap between 3D model and text */}
-        <div className="absolute bottom-0 left-0 right-0 h-[45%] bg-gradient-to-t from-black via-black/75 to-transparent z-10 pointer-events-none" />
+        {/* Strong gradient fade — completely blacks out the bottom 50% */}
+        <div className="absolute bottom-0 left-0 right-0 h-[55%] bg-gradient-to-t from-black from-40% via-black/95 via-60% to-transparent z-10 pointer-events-none" />
 
-        <div className="container mx-auto px-6 md:px-12 lg:px-20 relative z-20 mt-auto pb-16 md:pb-24">
+        {/* Text — sits well below the 3D model in clean dark space */}
+        <div className="container mx-auto px-6 md:px-12 lg:px-20 relative z-20 pb-20 md:pb-28">
           <motion.h1
             initial={{ y: 40, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
