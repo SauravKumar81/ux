@@ -8,18 +8,29 @@ const AnimatedShaderBackground = () => {
     const container = containerRef.current;
     if (!container) return;
 
+    // Use container size, fallback to window if not yet laid out
     const w = container.clientWidth  || window.innerWidth;
     const h = container.clientHeight || window.innerHeight;
-    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    const scene    = new THREE.Scene();
+    const camera   = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setSize(w, h);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    container.appendChild(renderer.domElement);
+
+    // Force canvas to fill container via CSS (Three.js sets pixel attrs, not CSS)
+    const canvas = renderer.domElement;
+    canvas.style.position = 'absolute';
+    canvas.style.inset    = '0';
+    canvas.style.width    = '100%';
+    canvas.style.height   = '100%';
+    canvas.style.display  = 'block';
+    container.appendChild(canvas);
 
     const material = new THREE.ShaderMaterial({
       uniforms: {
         iTime:       { value: 0 },
-        iResolution: { value: new THREE.Vector2(container.clientWidth, container.clientHeight) },
+        iResolution: { value: new THREE.Vector2(w, h) },
       },
       vertexShader: `
         void main() {
@@ -41,7 +52,7 @@ const AnimatedShaderBackground = () => {
           vec2 u  = fract(p);
           u = u * u * (3.0 - 2.0 * u);
           return mix(
-            mix(rand(ip),              rand(ip + vec2(1.0, 0.0)), u.x),
+            mix(rand(ip),                 rand(ip + vec2(1.0, 0.0)), u.x),
             mix(rand(ip + vec2(0.0,1.0)), rand(ip + vec2(1.0,1.0)), u.x),
             u.y
           );
@@ -97,7 +108,7 @@ const AnimatedShaderBackground = () => {
     });
 
     const geometry = new THREE.PlaneGeometry(2, 2);
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh     = new THREE.Mesh(geometry, material);
     scene.add(mesh);
 
     let frameId: number;
@@ -119,9 +130,7 @@ const AnimatedShaderBackground = () => {
     return () => {
       cancelAnimationFrame(frameId);
       window.removeEventListener('resize', handleResize);
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
+      if (container.contains(canvas)) container.removeChild(canvas);
       geometry.dispose();
       material.dispose();
       renderer.dispose();
@@ -131,7 +140,7 @@ const AnimatedShaderBackground = () => {
   return (
     <div
       ref={containerRef}
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+      style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
     />
   );
 };

@@ -238,6 +238,47 @@ export default function App() {
           </motion.div>
         </div>
 
+        {/* Floating visual accent — colorful swirl art, right side */}
+        <motion.div
+          initial={{ opacity: 0, x: 60, rotate: 8 }}
+          animate={{ opacity: 1, x: 0, rotate: 6 }}
+          transition={{ duration: 1.2, delay: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          className="absolute right-[-60px] md:right-[-20px] lg:right-[40px] top-[15%] w-[220px] md:w-[280px] lg:w-[320px] pointer-events-none z-10"
+        >
+          <div className="relative rounded-2xl overflow-hidden shadow-2xl shadow-black/60 border border-white/10">
+            <img
+              src="/freepik__nay-buityfull-art-vibrant-colors-flowing-organic-s__28905.png"
+              alt="Digital Art"
+              className="w-full aspect-square object-cover"
+              draggable={false}
+            />
+            {/* Glass label */}
+            <div className="absolute bottom-3 left-3 right-3 bg-black/50 backdrop-blur-md rounded-xl px-3 py-2 flex items-center gap-2">
+              <span className="text-[9px] uppercase tracking-[0.25em] text-white/60 font-semibold">Digital Art</span>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Floating dark portrait — left side */}
+        <motion.div
+          initial={{ opacity: 0, x: -60, rotate: -8 }}
+          animate={{ opacity: 1, x: 0, rotate: -5 }}
+          transition={{ duration: 1.2, delay: 0.8, ease: [0.16, 1, 0.3, 1] }}
+          className="absolute left-[-60px] md:left-[-20px] lg:left-[40px] bottom-[18%] w-[160px] md:w-[200px] lg:w-[230px] pointer-events-none z-10"
+        >
+          <div className="relative rounded-2xl overflow-hidden shadow-2xl shadow-black/60 border border-white/10">
+            <img
+              src="/a440f6252c56d0a59ed83ab39b9c3e84.jpg"
+              alt="Branding Visual"
+              className="w-full aspect-[3/4] object-cover"
+              draggable={false}
+            />
+            <div className="absolute bottom-3 left-3 right-3 bg-black/50 backdrop-blur-md rounded-xl px-3 py-2">
+              <span className="text-[9px] uppercase tracking-[0.25em] text-white/60 font-semibold">Branding</span>
+            </div>
+          </div>
+        </motion.div>
+
         {/* Scroll hint */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -292,6 +333,24 @@ export default function App() {
           ]}
         />
 
+        <ProjectCard
+          title="Branding & Digital"
+          category="crafting visual identities where dark aesthetics meet vibrant digital expression"
+          tags={['Branding', 'Digital Art', 'Art Direction']}
+          description={{
+            col1: "A series of branding and digital projects exploring the tension between minimalism and maximalism. The work marries editorial dark photography with bold, flowing organic forms — creating identities that feel both timeless and unmistakably modern.",
+            col2: "We approach each digital identity as a living system — one that breathes across print and screen. The color language draws from vibrant watercolor traditions while the photography anchors the work in raw, human emotion. The result is branding that stops people mid-scroll."
+          }}
+          images={[
+            "/a440f6252c56d0a59ed83ab39b9c3e84.jpg",
+            "/freepik__nay-buityfull-art-vibrant-colors-flowing-organic-s__28905.png",
+            "/a5b483c991d37745b025f25d0f3bed19.jpg",
+            "/8b9cec20e9136e5a55ce6a1420f6ad3c.jpg",
+            "/33ec5d7d85dcfbb10f3a68322458b80a.jpg",
+            "/50dfc22035ab9e4862e2fc93e5d9d9eb.jpg",
+          ]}
+        />
+
         {/* Services Section */}
         <section className="py-32 bg-zinc-950" id="services">
           <div className="container mx-auto px-6">
@@ -306,15 +365,27 @@ export default function App() {
               <ServiceCard
                 title="Branding"
                 description="Logos are just the tip of the iceberg."
-                color="bg-emerald-500/20"
-                icon={<div className="w-20 h-20 bg-emerald-400 rounded-full blur-xl opacity-50" />}
+                color="bg-zinc-900"
+                icon={
+                  <img
+                    src="/a440f6252c56d0a59ed83ab39b9c3e84.jpg"
+                    alt="Branding"
+                    className="w-full h-full object-cover rounded-full"
+                  />
+                }
                 list={['Brand Identity', 'Logo Design', 'Brand Book', '2D/3D Illustration', 'Packaging', 'Naming & Copy']}
               />
               <ServiceCard
                 title="Digital"
                 description="Clear structure, strong visuals, no fluff."
-                color="bg-pink-500/20"
-                icon={<div className="w-20 h-20 bg-pink-400 rounded-lg blur-xl opacity-50 rotate-12" />}
+                color="bg-zinc-900"
+                icon={
+                  <img
+                    src="/freepik__nay-buityfull-art-vibrant-colors-flowing-organic-s__28905.png"
+                    alt="Digital"
+                    className="w-full h-full object-cover rounded-full"
+                  />
+                }
                 list={['Web Design', 'Landing Pages', 'No-Code Dev', '3D & VFX', 'Motion', 'Social Media Content']}
               />
             </div>
