@@ -54,7 +54,10 @@ const ResponsiveSplineScene = ({ sceneUrl, isVisible }: { sceneUrl: string; isVi
   const [loaded, setLoaded] = useState(false);
   // Key: don't even START mounting Spline until page is interactive
   const [shouldMount, setShouldMount] = useState(false);
+  // If WebGL context is lost (GPU failure), fall back gracefully
+  const [webGLFailed, setWebGLFailed] = useState(false);
   const splineRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Debounced mobile check
   useEffect(() => {
@@ -105,6 +108,20 @@ const ResponsiveSplineScene = ({ sceneUrl, isVisible }: { sceneUrl: string; isVi
   const handleSplineLoad = useCallback((splineApp: any) => {
     splineRef.current = splineApp;
     setLoaded(true);
+
+    // Attach WebGL context-loss listener to the canvas Spline created
+    // so we can gracefully fall back if the GPU driver fully gives up
+    setTimeout(() => {
+      const canvas = containerRef.current?.querySelector('canvas');
+      if (canvas) {
+        canvas.addEventListener('webglcontextlost', (e) => {
+          e.preventDefault();
+          setLoaded(false);
+          setWebGLFailed(true);
+          setShouldMount(false);
+        }, { once: true });
+      }
+    }, 500);
   }, []);
 
   // Mobile: lightweight static fallback (no WebGL at all)
@@ -133,6 +150,17 @@ const ResponsiveSplineScene = ({ sceneUrl, isVisible }: { sceneUrl: string; isVi
     );
   }
 
+  // Treat webGL failure same as mobile — use the static fallback
+  if (webGLFailed) {
+    return (
+      <div className="absolute inset-0">
+        <div className="absolute inset-0 bg-black" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(60,60,70,0.5),transparent)]" />
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-zinc-800/30 blur-3xl animate-pulse" />
+      </div>
+    );
+  }
+
   return (
     <div className="absolute inset-0 z-0">
       {/* Beautiful animated placeholder — shown instantly, zero cost */}
@@ -147,7 +175,7 @@ const ResponsiveSplineScene = ({ sceneUrl, isVisible }: { sceneUrl: string; isVi
       {/* Spline — only mounts after 1.5s idle delay */}
       {shouldMount && (
         <Suspense fallback={null}>
-          <div className={`w-full h-full transition-opacity duration-1000 ${loaded ? 'opacity-100' : 'opacity-0'}`}>
+          <div ref={containerRef} className={`w-full h-full transition-opacity duration-1000 ${loaded ? 'opacity-100' : 'opacity-0'}`}>
             <Spline
               scene={sceneUrl}
               className="w-full h-full"
@@ -155,6 +183,19 @@ const ResponsiveSplineScene = ({ sceneUrl, isVisible }: { sceneUrl: string; isVi
             />
           </div>
         </Suspense>
+      )}
+
+      {/* Subtle status badge — confirms 3D scene is live */}
+      {loaded && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="absolute top-5 right-5 flex items-center gap-2 bg-black/40 backdrop-blur-md border border-white/10 rounded-full px-3 py-1.5 text-[10px] text-zinc-400 font-medium tracking-wider uppercase"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          3D Live
+        </motion.div>
       )}
     </div>
   );
