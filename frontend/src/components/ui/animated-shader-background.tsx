@@ -8,7 +8,8 @@ const AnimatedShaderBackground = () => {
     const container = containerRef.current;
     if (!container) return;
 
-    const scene = new THREE.Scene();
+    const w = container.clientWidth  || window.innerWidth;
+    const h = container.clientHeight || window.innerHeight;
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
@@ -108,10 +109,10 @@ const AnimatedShaderBackground = () => {
     animate();
 
     const handleResize = () => {
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      renderer.setSize(w, h);
-      material.uniforms.iResolution.value.set(w, h);
+      const nw = container.clientWidth  || window.innerWidth;
+      const nh = container.clientHeight || window.innerHeight;
+      renderer.setSize(nw, nh);
+      material.uniforms.iResolution.value.set(nw, nh);
     };
     window.addEventListener('resize', handleResize);
 
@@ -127,7 +128,12 @@ const AnimatedShaderBackground = () => {
     };
   }, []);
 
-  return <div ref={containerRef} className="absolute inset-0 w-full h-full" />;
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+    />
+  );
 };
 
 export default AnimatedShaderBackground;
