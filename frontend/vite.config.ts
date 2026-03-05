@@ -18,16 +18,15 @@ export default defineConfig(({mode}) => {
     // Pre-bundle heavy deps so they don't block initial render
     optimizeDeps: {
       include: ['motion/react', 'lucide-react', 'lodash.debounce'],
-      exclude: ['@splinetool/react-spline', '@splinetool/runtime'],
     },
     build: {
       rollupOptions: {
         output: {
           manualChunks: {
-            // Spline loads in its own separate chunk — never blocks main bundle
-            spline: ['@splinetool/react-spline', '@splinetool/runtime'],
             // React + motion in one chunk
             vendor: ['react', 'react-dom', 'motion/react'],
+            // Three.js in its own chunk (used by shader background)
+            three: ['three'],
           },
         },
       },
