@@ -1,5 +1,5 @@
 import React, { useState, Suspense, lazy, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { Plus, Minus, ArrowUpRight, Phone } from 'lucide-react';
 import { cn } from './lib/utils';
 
@@ -47,158 +47,136 @@ const Navbar = () => {
   );
 };
 
-// --- Optimized Spline Component — deferred idle load ---
-
-const ResponsiveSplineScene = ({ sceneUrl, isVisible }: { sceneUrl: string; isVisible: boolean }) => {
-  const [isMobile, setIsMobile] = useState(false);
+// --- Spline Scene — loads once, NEVER re-renders ---
+// React.memo with () => true as comparator means this component renders
+// EXACTLY ONCE. All subsequent prop changes are silently ignored.
+// All visibility/scroll logic runs inside via DOM refs — zero state updates.
+const SplineScene = React.memo(({ sceneUrl }: { sceneUrl: string }) => {
+  const isMobile = window.innerWidth < 768;
   const [loaded, setLoaded] = useState(false);
-  // Key: don't even START mounting Spline until page is interactive
   const [shouldMount, setShouldMount] = useState(false);
-  // If WebGL context is lost (GPU failure), fall back gracefully
   const [webGLFailed, setWebGLFailed] = useState(false);
   const splineRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Debounced mobile check
+  // Deferred mount — wait for idle, then load Spline once
   useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout>;
-    const check = () => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => setIsMobile(window.innerWidth < 768), 150);
-    };
-    setIsMobile(window.innerWidth < 768);
-    window.addEventListener('resize', check);
-    return () => {
-      window.removeEventListener('resize', check);
-      clearTimeout(timeoutId);
-    };
-  }, []);
-
-  // Deferred mount: wait for page to be fully interactive, then load Spline
-  // Uses requestIdleCallback so it never blocks user interaction
-  useEffect(() => {
-    if (isMobile) return; // mobile uses static fallback
+    if (isMobile) return;
     let rafId: number;
-    const mountSpline = () => {
-      setShouldMount(true);
-    };
-    // Wait 1.5s then mount during browser idle time
+    const mount = () => setShouldMount(true);
     const timerId = setTimeout(() => {
       if ('requestIdleCallback' in window) {
-        (window as any).requestIdleCallback(mountSpline, { timeout: 3000 });
+        (window as any).requestIdleCallback(mount, { timeout: 3000 });
       } else {
-        rafId = requestAnimationFrame(mountSpline);
+        rafId = requestAnimationFrame(mount);
       }
     }, 1500);
-    return () => {
-      clearTimeout(timerId);
-      cancelAnimationFrame(rafId);
-    };
-  }, [isMobile]);
+    return () => { clearTimeout(timerId); cancelAnimationFrame(rafId); };
+  }, []); // [] = runs once, never again
 
-  // Pause/resume Spline rendering based on hero visibility
+  // After load: (1) freeze WebGL during scroll, (2) pause when hero off-screen
+  // Both use refs + direct DOM/API calls — ZERO state updates after this point
   useEffect(() => {
-    if (!splineRef.current) return;
-    try {
-      if (isVisible) splineRef.current.play?.();
-      else splineRef.current.pause?.();
-    } catch { /* Spline API may not support play/pause on all versions */ }
-  }, [isVisible]);
+    if (!loaded) return;
 
-  const handleSplineLoad = useCallback((splineApp: any) => {
-    splineRef.current = splineApp;
-    setLoaded(true);
+    // ── Freeze canvas during scroll (stops GPU rasterization entirely) ─────
+    let scrollTimer: ReturnType<typeof setTimeout>;
+    const onScroll = () => {
+      if (containerRef.current) containerRef.current.style.visibility = 'hidden';
+      clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        if (containerRef.current) containerRef.current.style.visibility = 'visible';
+      }, 150);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
 
-    // Attach WebGL context-loss listener to the canvas Spline created
-    // so we can gracefully fall back if the GPU driver fully gives up
-    setTimeout(() => {
+    // ── Pause Spline when hero leaves viewport (via IntersectionObserver) ───
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        try {
+          if (entry.isIntersecting) splineRef.current?.play?.();
+          else splineRef.current?.pause?.();
+        } catch { /* Spline API may not support this */ }
+      },
+      { threshold: 0, rootMargin: '0px 0px 200px 0px' }
+    );
+    if (wrapperRef.current) observer.observe(wrapperRef.current);
+
+    // ── WebGL context-loss fallback ───────────────────────────────
+etTimeout(() => {
       const canvas = containerRef.current?.querySelector('canvas');
       if (canvas) {
         canvas.addEventListener('webglcontextlost', (e) => {
           e.preventDefault();
-          setLoaded(false);
           setWebGLFailed(true);
           setShouldMount(false);
         }, { once: true });
       }
     }, 500);
+
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      clearTimeout(scrollTimer);
+      observer.disconnect();
+    };
+  }, [loaded]); // runs once after load
+
+  const handleSplineLoad = useCallback((splineApp: any) => {
+    splineRef.current = splineApp;
+    setLoaded(true);
   }, []);
 
-  // Mobile: lightweight static fallback (no WebGL at all)
+  // Mobile: CSS-only static fallback
   if (isMobile) {
     return (
       <div className="absolute inset-0 flex items-center justify-center gap-4">
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.2 }}
-          className="w-24 h-24 rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 shadow-2xl"
-        />
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.4 }}
-          className="w-32 h-32 rounded-[24px] bg-gradient-to-br from-zinc-600 to-zinc-800 shadow-2xl -rotate-6"
-        />
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.6 }}
-          className="w-24 h-24 rounded-3xl bg-gradient-to-br from-zinc-700 to-zinc-900 shadow-2xl rotate-45"
-        />
+        <div className="w-24 h-24 rounded-full bg-gradient-to-br from-zinc-700 to-zinc-900 shadow-2xl" />
+        <div className="w-32 h-32 rounded-[24px] bg-gradient-to-br from-zinc-600 to-zinc-800 shadow-2xl -rotate-6" />
+        <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-zinc-700 to-zinc-900 shadow-2xl rotate-45" />
       </div>
     );
   }
 
-  // Treat webGL failure same as mobile — use the static fallback
   if (webGLFailed) {
     return (
-      <div className="absolute inset-0">
-        <div className="absolute inset-0 bg-black" />
+      <div className="absolute inset-0 bg-black">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(60,60,70,0.5),transparent)]" />
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-zinc-800/30 blur-3xl animate-pulse" />
       </div>
     );
   }
 
   return (
-    <div className="absolute inset-0 z-0">
-      {/* Beautiful animated placeholder — shown instantly, zero cost */}
-      <div
-        className={`absolute inset-0 transition-opacity duration-1000 ${loaded ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-      >
+    <div ref={wrapperRef} className="absolute inset-0 z-0">
+      {/* Placeholder — fades out once Spline loads */}
+      <div className={`absolute inset-0 transition-opacity duration-1000 ${loaded ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
         <div className="absolute inset-0 bg-black" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(60,60,70,0.5),transparent)]" />
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full bg-zinc-800/30 blur-3xl animate-pulse" />
       </div>
 
-      {/* Spline — only mounts after 1.5s idle delay */}
+      {/* Spline — mounts once after idle, never unmounts */}
       {shouldMount && (
         <Suspense fallback={null}>
-          <div ref={containerRef} className={`w-full h-full transition-opacity duration-1000 ${loaded ? 'opacity-100' : 'opacity-0'}`}>
-            <Spline
-              scene={sceneUrl}
-              className="w-full h-full"
-              onLoad={handleSplineLoad}
-            />
+          <div
+            ref={containerRef}
+            className={`w-full h-full transition-opacity duration-1000 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+          >
+            <Spline scene={sceneUrl} className="w-full h-full" onLoad={handleSplineLoad} />
           </div>
         </Suspense>
       )}
 
-      {/* Subtle status badge — confirms 3D scene is live */}
+      {/* Live status badge */}
       {loaded && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="absolute top-5 right-5 flex items-center gap-2 bg-black/40 backdrop-blur-md border border-white/10 rounded-full px-3 py-1.5 text-[10px] text-zinc-400 font-medium tracking-wider uppercase"
-        >
+        <div className="absolute top-5 right-5 flex items-center gap-2 bg-black/40 backdrop-blur-md border border-white/10 rounded-full px-3 py-1.5 text-[10px] text-zinc-400 font-medium tracking-wider uppercase">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           3D Live
-        </motion.div>
+        </div>
       )}
     </div>
   );
+}, () => true); // ←─ second arg: always return true = props never changed = never re-render
 };
 
 
@@ -230,22 +208,21 @@ const ProjectCard = ({ title, category, description, images, tags }: any) => {
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {images.map((src: string, i: number) => (
-            <motion.div
+            <div
               key={i}
-              whileHover={{ scale: 0.98 }}
               className={cn(
                 "aspect-square bg-zinc-900 rounded-2xl overflow-hidden relative group",
+                "transition-transform duration-200 ease-out hover:scale-[0.98]",
                 i === 0 && "md:col-span-2 md:row-span-2 aspect-auto"
               )}
             >
               <img
                 src={src}
                 alt={`${title} ${i}`}
-                className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
-                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-[filter] duration-500"
                 loading="lazy"
               />
-            </motion.div>
+            </div>
           ))}
         </div>
       </div>
@@ -322,20 +299,15 @@ const FAQItem = ({ question, answer }: any) => {
         <span className="text-lg font-medium group-hover:text-zinc-400 transition-colors">{question}</span>
         {isOpen ? <Minus className="w-5 h-5 text-zinc-500" /> : <Plus className="w-5 h-5 text-zinc-500" />}
       </button>
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden"
-          >
-            <p className="pb-6 text-zinc-500 text-sm leading-relaxed max-w-2xl">
-              {answer}
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* CSS max-height transition — no layout thrash, no Framer Motion overhead */}
+      <div
+        className="overflow-hidden transition-[max-height,opacity] duration-300 ease-in-out"
+        style={{ maxHeight: isOpen ? '200px' : '0px', opacity: isOpen ? 1 : 0 }}
+      >
+        <p className="pb-6 text-zinc-500 text-sm leading-relaxed max-w-2xl">
+          {answer}
+        </p>
+      </div>
     </div>
   );
 };
@@ -344,23 +316,6 @@ const FAQItem = ({ question, answer }: any) => {
 
 export default function App() {
   const heroRef = useRef<HTMLDivElement>(null);
-  const [isHeroVisible, setIsHeroVisible] = useState(true);
-
-  // Pause/resume Spline based on hero visibility.
-  // rootMargin gives a 200px buffer so Spline pauses *before* it leaves
-  // the screen — eliminates the visible hitch at the transition boundary.
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        setIsHeroVisible(entry.isIntersecting);
-      },
-      { threshold: 0, rootMargin: '0px 0px 200px 0px' }
-    );
-
-    if (heroRef.current) observer.observe(heroRef.current);
-    return () => observer.disconnect();
-  }, []);
-
   return (
     <div className="min-h-screen bg-black selection:bg-white selection:text-black">
       <Navbar />
@@ -370,12 +325,9 @@ export default function App() {
         ref={heroRef}
         className="relative min-h-[150svh] flex flex-col justify-end overflow-hidden"
       >
-        {/* Spline Scene — promoted to own GPU layer via gpu-layer class */}
+        {/* Spline Scene — renders once, frozen to its own GPU layer */}
         <div className="absolute inset-0 w-full h-full bg-black pointer-events-none gpu-layer">
-          <ResponsiveSplineScene
-            sceneUrl="https://prod.spline.design/8CLWkeoM6y2sXPgC/scene.splinecode"
-            isVisible={isHeroVisible}
-          />
+          <SplineScene sceneUrl="https://prod.spline.design/8CLWkeoM6y2sXPgC/scene.splinecode" />
         </div>
 
         {/* Strong gradient fade — completely blacks out the bottom 50% */}
@@ -396,13 +348,12 @@ export default function App() {
         </div>
       </section>
 
-      {/* Projects — lazy-section defers paint until scrolled near */}
-      <div className="py-10 text-center bg-black relative z-10 lazy-section">
+      {/* Projects */}
+      <div className="py-10 text-center bg-black relative z-10">
         <span className="text-[10px] uppercase tracking-[0.3em] text-zinc-600 font-bold">Projects</span>
       </div>
 
-      {/* contain:paint so project-card reflows don't repaint the full page */}
-      <div className="relative z-10 bg-black" style={{ contain: 'paint' }}>
+      <div className="relative z-10 bg-black">
         <ProjectCard
           title="Avant-Garde Territory"
           category="visual language for telling the story of Ural's Avant-garde architecture in a modern way"
@@ -412,12 +363,12 @@ export default function App() {
             col2: "We created a flexible identity that merges Avant-garde principles with a modern approach, combining bold colors, geometric forms, and neo-grotesque typography. At its center stands the region's iconic constructivist building, reimagined as a graphic symbol of cultural continuity."
           }}
           images={[
-            "https://picsum.photos/seed/arch1/800/800",
-            "https://picsum.photos/seed/arch2/400/400",
-            "https://picsum.photos/seed/arch3/400/400",
-            "https://picsum.photos/seed/arch4/400/400",
-            "https://picsum.photos/seed/arch5/400/400",
-            "https://picsum.photos/seed/arch6/400/400",
+            "/05aba8a8ca4c3707768efd7bb240b021.jpg",
+            "/33ec5d7d85dcfbb10f3a68322458b80a.jpg",
+            "/50dfc22035ab9e4862e2fc93e5d9d9eb.jpg",
+            "/71e8041b0acb1f1853ed75a201245b61.jpg",
+            "/8b9cec20e9136e5a55ce6a1420f6ad3c.jpg",
+            "/8ffcf5f3c7602fa9252cef5fb8465ad8.jpg",
           ]}
         />
 
@@ -430,17 +381,17 @@ export default function App() {
             col2: "The identity was crafted to invite openness and authentic dialogue. The office becomes more than a space — it's a place for dialogue, sharing, and passion for work. Serif and sans typography mix with smooth shapes, while lively office-life illustrations and a bold palette add energy."
           }}
           images={[
-            "https://picsum.photos/seed/office1/800/800",
-            "https://picsum.photos/seed/office2/400/400",
-            "https://picsum.photos/seed/office3/400/400",
-            "https://picsum.photos/seed/office4/400/400",
-            "https://picsum.photos/seed/office5/400/400",
-            "https://picsum.photos/seed/office6/400/400",
+            "/a5b483c991d37745b025f25d0f3bed19.jpg",
+            "/8ffcf5f3c7602fa9252cef5fb8465ad8.jpg",
+            "/05aba8a8ca4c3707768efd7bb240b021.jpg",
+            "/50dfc22035ab9e4862e2fc93e5d9d9eb.jpg",
+            "/33ec5d7d85dcfbb10f3a68322458b80a.jpg",
+            "/71e8041b0acb1f1853ed75a201245b61.jpg",
           ]}
         />
 
         {/* Services Section */}
-        <section className="py-32 bg-zinc-950 lazy-section" id="services">
+        <section className="py-32 bg-zinc-950" id="services">
           <div className="container mx-auto px-6">
             <div className="text-center mb-20">
               <span className="text-[10px] uppercase tracking-[0.3em] text-zinc-600 font-bold mb-4 block">Services</span>
